@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from urllib.parse import quote
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
@@ -120,5 +121,6 @@ def delete_note(id):
     return jsonify({'message': 'Note deleted successfully'})
 
 if __name__ == '__main__':
-    db.create_all()
+    with app.app_context():
+        db.create_all()
     app.run(debug=True)
