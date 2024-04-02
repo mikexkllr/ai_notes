@@ -3,6 +3,8 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from urllib.parse import quote
 from werkzeug.security import generate_password_hash, check_password_hash
+import requests
+
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///notes.db'
@@ -28,6 +30,13 @@ class Note(db.Model):
     content = db.Column(db.Text)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     user = db.relationship('User', backref='notes')
+
+# Database model for chats
+class Chat(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    note_id = db.Column(db.Integer, db.ForeignKey('note.id'), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    is_user_request = db.Column(db.Boolean, nullable=False)
 
 # Routes for user authentication
 @app.route('/auth/register', methods=['POST'])
@@ -119,6 +128,53 @@ def delete_note(id):
     db.session.delete(note)
     db.session.commit()
     return jsonify({'message': 'Note deleted successfully'})
+
+
+# Chat routes
+@app.route('/notes/<int:id>/chats', methods=['GET'])
+@jwt_required()
+def get_chats(id):
+    current_user_id = get_jwt_identity()
+    note = Note.query.filter_by(id=id, user_id=current_user_id).first()
+    if not note:
+        return jsonify({'message': 'Note not found'}), 404
+
+    chats = Chat.query.filter_by(note_id=id).all()
+    return jsonify([{'id': chat.id, 'message': chat.message, 'is_user_request': chat.is_user_request} for chat in chats])
+
+@app.route('/notes/<int:id>/chats', methods=['POST'])
+@jwt_required()
+def create_chat(id):
+    current_user_id = get_jwt_identity()
+    note = Note.query.filter_by(id=id, user_id=current_user_id).first()
+    if not note:
+        return jsonify({'message': 'Note not found'}), 404
+
+    message = request.json.get('message')
+    if not message:
+        return jsonify({'message': 'Missing message'}), 400
+
+    # Assume first message is always user request
+    is_user_request = True
+
+    # Call OpenAI API for response
+    response = requests.post('http://localhost:5000/openai/chat', json={'message': message}).json()
+
+    # Store user request
+    new_chat = Chat(note_id=id, message=message, is_user_request=is_user_request)
+    db.session.add(new_chat)
+
+    # Store OpenAI response
+    response_message = response.get('message')
+    if response_message:
+        is_user_request = False
+        new_chat = Chat(note_id=id, message=response_message, is_user_request=is_user_request)
+        db.session.add(new_chat)
+
+    db.session.commit()
+    return jsonify({'message': 'Chat created successfully'}), 201
+
+
 
 if __name__ == '__main__':
     with app.app_context():
